@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arbitrage Scanner</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #121212; color: #fff; margin: 0; padding: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #333; }
+    th { background: #1f1f1f; }
+    .profit { color: #00ff00; font-weight: bold; }
+    .loss { color: #ff4444; }
+    h1 { text-align: center; margin-bottom: 10px; }
+    .updated { text-align: center; font-size: 0.8em; color: #888; margin-top: 5px; }
+  </style>
+</head>
+<body>
+
+  <h1>Arbitrage Scanner: MEXC ↔ Gate.io</h1>
+  <div class="updated" id="last-updated">Updated: --</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Coin</th>
+        <th>Buy on</th>
+        <th>Sell on</th>
+        <th>Buy Price</th>
+        <th>Sell Price</th>
+        <th>Profit %</th>
+      </tr>
+    </thead>
+    <tbody id="table-body">
+      <tr><td colspan="6" style="text-align:center;">Loading...</td></tr>
+    </tbody>
+  </table>
+
+<script>
+const tableBody = document.getElementById('table-body');
+const lastUpdated = document.getElementById('last-updated');
+
+async function fetchPrices() {
+  try {
+    // Подтянуть данные с бирж
+    const [mexcRes, gateRes] = await Promise.all([
+      fetch('https://api.mexc.com/api/v3/ticker/bookTicker'),
+      fetch('https://api.gateio.ws/api/v4/spot/tickers')
+    ]);
+
+    const [mexcData, gateData] = await Promise.all([
+      mexcRes.json(),
+      gateRes.json()
+    ]);
+
+    const mexcMap = new Map();
+    mexcData.forEach(item => {
+      if(item.symbol.endsWith('USDT')) {
+        mexcMap.set(item.symbol.replace('USDT', ''), {
+          ask: parseFloat(item.askPrice),
+          bid: parseFloat(item.bidPrice)
+        });
+      }
+    });
+
+    const gateMap = new Map();
+    gateData.forEach(item => {
+      if(item.currency_pair.endsWith('_USDT')) {
+        gateMap.set(item.currency_pair.replace('_USDT', ''), {
+          ask: parseFloat(item.lowest_ask),
+          bid: parseFloat(item.highest_bid)
+        });
+      }
+    });
+
+    const results = [];
+
+    mexcMap.forEach((mexcPrice, coin) => {
+      const gatePrice = gateMap.get(coin);
+      if(gatePrice) {
+        const buyOnMexcSellOnGate = ((gatePrice.bid - mexcPrice.ask) / mexcPrice.ask) * 100;
+        const buyOnGateSellOnMexc = ((mexcPrice.bid - gatePrice.ask) / gatePrice.ask) * 100;
+
+        if (buyOnMexcSellOnGate > 0) {
+          results.push({ coin, buy: 'MEXC', sell: 'Gate.io', buyPrice: mexcPrice.ask, sellPrice: gatePrice.bid, profit: buyOnMexcSellOnGate });
+        }
+
+        if (buyOnGateSellOnMexc > 0) {
+          results.push({ coin, buy: 'Gate.io', sell: 'MEXC', buyPrice: gatePrice.ask, sellPrice: mexcPrice.bid, profit: buyOnGateSellOnMexc });
+        }
+      }
+    });
+
+    results.sort((a, b) => b.profit - a.profit);
+
+    tableBody.innerHTML = results.length ? results.map(r => `
+      <tr>
+        <td>${r.coin}</td>
+        <td>${r.buy}</td>
+        <td>${r.sell}</td>
+        <td>${r.buyPrice.toFixed(6)}</td>
+        <td>${r.sellPrice.toFixed(6)}</td>
+        <td class="${r.profit > 0 ? 'profit' : 'loss'}">${r.profit.toFixed(2)}%</td>
+      </tr>
+    `).join('') : '<tr><td colspan="6" style="text-align:center;">No Arbitrage Opportunities</td></tr>';
+
+    lastUpdated.textContent = 'Updated: ' + new Date().toLocaleTimeString();
+
+  } catch (error) {
+    console.error(error);
+    tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Error loading data</td></tr>';
+  }
+}
+
+fetchPrices();
+setInterval(fetchPrices, 1000);
+</script>
+
+</body>
+</html>
